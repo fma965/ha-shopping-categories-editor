@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shopping Categories Editor</title>
+<style>
+  :root { --bg:#fff; --fg:#222; --muted:#777; --line:#ddd; --accent:#2563eb; --danger:#c62828; --card:#f7f7f9; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#16181d; --fg:#e6e6e6; --muted:#8b8f98; --line:#2e323a; --accent:#6ea0ff; --danger:#ff6b6b; --card:#1d2027; }
+  }
+  body { font:15px system-ui,sans-serif; background:var(--bg); color:var(--fg); max-width:900px; margin:0 auto; padding:16px; }
+  h1 { font-size:1.2rem; margin:0 0 12px; }
+  .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; position:sticky; top:0; background:var(--bg); padding:8px 0; z-index:1; }
+  button, input[type=text] { font:inherit; color:inherit; background:transparent; border:1px solid var(--line); border-radius:6px; padding:4px 8px; }
+  button { cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.35; cursor:default; }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .del { color:var(--danger); }
+  details { background:var(--card); border:1px solid var(--line); border-radius:8px; margin-bottom:8px; }
+  summary { cursor:pointer; padding:8px 10px; display:flex; align-items:center; gap:8px; }
+  summary .count { color:var(--muted); font-size:.85rem; }
+  summary .cat-name { font-weight:600; flex:1; min-width:0; }
+  .items { padding:0 10px 10px; }
+  .item { display:grid; grid-template-columns:28px 1fr 1fr 40px 1.4fr auto; gap:6px; align-items:center; padding:4px 0; border-top:1px solid var(--line); }
+  .item input[type=text] { min-width:0; width:100%; box-sizing:border-box; }
+  .item input[type=color] { width:36px; height:28px; padding:0; border:1px solid var(--line); border-radius:6px; background:none; }
+  .item img { width:24px; height:24px; }
+  .btns { display:flex; gap:2px; }
+  .head { color:var(--muted); font-size:.75rem; border-top:0; }
+  .add { display:flex; gap:8px; margin-top:8px; }
+  .add input { flex:1; }
+  .status { color:var(--muted); font-size:.85rem; margin:8px 0; }
+  textarea { width:100%; height:8rem; font:12px monospace; color:inherit; background:transparent; border:1px solid var(--line); border-radius:6px; box-sizing:border-box; }
+  @media (max-width:700px) { .item { grid-template-columns:28px 1fr 40px auto; } .item .icon, .item .types, .head { display:none; } }
+</style>
+</head>
+<body>
+<h1>Shopping Categories Editor</h1>
+<div class="bar">
+  <button id="open">Open…</button>
+  <button id="paste">Paste JSON…</button>
+  <button id="save" class="primary">Save / Download</button>
+  <button id="expand">Expand all</button>
+  <button id="collapse">Collapse all</button>
+  <input type="file" id="file" accept=".json,application/json" hidden>
+</div>
+<div id="pasteBox" hidden>
+  <textarea id="pasteText" placeholder="Paste JSON here"></textarea>
+  <button id="pasteLoad">Load</button>
+</div>
+<div id="cats"></div>
+<form class="add" id="addCat">
+  <input type="text" id="newCat" placeholder="New category…" autocomplete="off">
+  <button>Add category</button>
+</form>
+<div class="status" id="status">Open or paste a JSON file to begin.</div>
+
+<script>
+// cats: array of { name, items: [ {title, off_icon, on_color, types?, ...} ] } — array keeps key order.
+let cats = [];
+let filename = "shopping_categories.json";
+const open = new Set();
+const $ = id => document.getElementById(id);
+const status = m => { $("status").textContent = m; };
+
+function el(tag, props = {}, ...kids) {
+  const e = Object.assign(document.createElement(tag), props);
+  e.append(...kids);
+  return e;
+}
+function iconUrl(icon) {
+  const [set, name] = (icon || "").split(":");
+  return set && name ? `https://api.iconify.design/${set}/${name}.svg` : "";
+}
+function swap(arr, i, d) { [arr[i], arr[i + d]] = [arr[i + d], arr[i]]; render(); }
+function arrows(arr, i) {
+  const up = el("button", { textContent: "↑", disabled: i === 0, onclick: e => { e.preventDefault(); swap(arr, i, -1); } });
+  const dn = el("button", { textContent: "↓", disabled: i === arr.length - 1, onclick: e => { e.preventDefault(); swap(arr, i, 1); } });
+  return [up, dn];
+}
+
+function render() {
+  const root = $("cats");
+  root.replaceChildren();
+  cats.forEach((cat, ci) => {
+    const d = el("details", { open: open.has(cat) });
+    d.ontoggle = () => { d.open ? open.add(cat) : open.delete(cat); };
+
+    const name = el("input", { type: "text", className: "cat-name", value: cat.name, oninput: () => { cat.name = name.value; } });
+    name.onclick = e => e.stopPropagation();
+    name.onkeydown = e => e.stopPropagation();
+    const del = el("button", { textContent: "✕", className: "del", title: "Delete category", onclick: e => {
+      e.preventDefault();
+      if (confirm(`Delete "${cat.name}" and its ${cat.items.length} items?`)) { cats.splice(ci, 1); render(); }
+    }});
+    d.append(el("summary", {}, name, el("span", { className: "count", textContent: `${cat.items.length} items` }), ...arrows(cats, ci), del));
+
+    const box = el("div", { className: "items" });
+    box.append(el("div", { className: "item head" },
+      el("span"), el("span", { textContent: "Title" }), el("span", { className: "icon", textContent: "Icon" }),
+      el("span", { textContent: "Colour" }), el("span", { className: "types", textContent: "Types (comma separated)" }), el("span")));
+
+    cat.items.forEach((it, ii) => {
+      const img = el("img", { src: iconUrl(it.off_icon), alt: "" });
+      img.onerror = () => { img.style.visibility = "hidden"; };
+      img.onload = () => { img.style.visibility = "visible"; };
+
+      const title = el("input", { type: "text", value: it.title ?? "", oninput: () => { it.title = title.value; } });
+      const icon = el("input", { type: "text", className: "icon", value: it.off_icon ?? "", oninput: () => { it.off_icon = icon.value; img.src = iconUrl(icon.value); } });
+      const color = el("input", { type: "color", value: /^#[0-9a-f]{6}$/i.test(it.on_color) ? it.on_color : "#888888", oninput: () => { it.on_color = color.value; } });
+      const types = el("input", { type: "text", className: "types", value: (it.types || []).join(", "), oninput: () => {
+        const t = types.value.split(",").map(s => s.trim()).filter(Boolean);
+        if (t.length) it.types = t; else delete it.types;
+      }});
+      const rm = el("button", { textContent: "✕", className: "del", onclick: () => { cat.items.splice(ii, 1); render(); } });
+      box.append(el("div", { className: "item" }, img, title, icon, color, types, el("div", { className: "btns" }, ...arrows(cat.items, ii), rm)));
+    });
+
+    const form = el("form", { className: "add", onsubmit: e => {
+      e.preventDefault();
+      const t = inp.value.trim();
+      if (!t) return;
+      // New items inherit the category's colour.
+      cat.items.push({ title: t, off_icon: "noto:package", on_color: cat.items[0]?.on_color || "#888888" });
+      open.add(cat);
+      render();
+    }});
+    const inp = el("input", { type: "text", placeholder: "Add item to this category…", autocomplete: "off" });
+    form.append(inp, el("button", { textContent: "Add item" }));
+    box.append(form);
+    d.append(box);
+    root.append(d);
+  });
+  status(`${cats.length} categories, ${cats.reduce((n, c) => n + c.items.length, 0)} items`);
+}
+
+function load(text) {
+  const data = JSON.parse(text);
+  if (!data || Array.isArray(data) || typeof data !== "object") throw new Error("Expected a JSON object of categories");
+  cats = Object.entries(data).map(([name, items]) => {
+    if (!Array.isArray(items)) throw new Error(`"${name}" is not a list`);
+    return { name, items };
+  });
+  open.clear();
+  render();
+}
+
+$("addCat").onsubmit = e => {
+  e.preventDefault();
+  const n = $("newCat").value.trim();
+  if (!n) return;
+  const c = { name: n, items: [] };
+  cats.push(c); open.add(c);
+  $("newCat").value = "";
+  render();
+};
+
+$("open").onclick = () => $("file").click();
+$("file").onchange = async e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  try { filename = f.name; load(await f.text()); }
+  catch (err) { status("Load failed: " + err.message); }
+  e.target.value = "";
+};
+$("paste").onclick = () => { $("pasteBox").hidden = !$("pasteBox").hidden; };
+$("pasteLoad").onclick = () => {
+  try { load($("pasteText").value); $("pasteBox").hidden = true; }
+  catch (err) { status("Load failed: " + err.message); }
+};
+$("expand").onclick = () => { cats.forEach(c => open.add(c)); render(); };
+$("collapse").onclick = () => { open.clear(); render(); };
+
+// When embedded in the Home Assistant frontend (same origin), talk to the integration over its websocket API.
+function getHass() {
+  try {
+    return window.parent !== window ? window.parent.document.querySelector("home-assistant")?.hass : null;
+  } catch { return null; }
+}
+
+$("save").onclick = async () => {
+  const names = cats.map(c => c.name);
+  const dupe = names.find((n, i) => names.indexOf(n) !== i);
+  if (dupe) { status(`Duplicate category name: "${dupe}" — fix before saving.`); return; }
+  const out = Object.fromEntries(cats.map(c => [c.name, c.items]));
+  const hass = getHass();
+  if (hass) {
+    try {
+      await hass.callWS({ type: "shopping_categories_editor/save", data: out });
+      status("Saved to Home Assistant");
+    } catch (err) { status("Save failed: " + (err.message || JSON.stringify(err))); }
+    return;
+  }
+  const blob = new Blob([JSON.stringify(out, null, 1) + "\n"], { type: "application/json" });
+  const a = el("a", { href: URL.createObjectURL(blob), download: filename });
+  a.click();
+  URL.revokeObjectURL(a.href);
+  status(`Saved ${filename}`);
+};
+
+render();
+(async () => {
+  const hass = getHass();
+  if (!hass) return;
+  $("save").textContent = "Save to Home Assistant";
+  try {
+    load(JSON.stringify(await hass.callWS({ type: "shopping_categories_editor/get" })));
+  } catch (err) { status("Load failed: " + (err.message || JSON.stringify(err))); }
+})();
+</script>
+</body>
+</html>

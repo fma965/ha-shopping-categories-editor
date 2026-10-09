@@ -1,0 +1,13 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Shopping Categories Editor",
+        "description": "Path of the JSON file to edit. Relative paths are resolved against the Home Assistant config directory.",
+        "data": { "file_path": "File path" }
+      }
+    },
+    "error": { "path_not_allowed": "That path is not allowed. Add its directory to allowlist_external_dirs or use a path under the config directory.", "invalid_json": "The file exists but is not a JSON object." },
+    "abort": { "single_instance_allowed": "Only one instance is supported." }
+  }
+}
